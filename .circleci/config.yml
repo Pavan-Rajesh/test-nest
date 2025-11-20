@@ -1,0 +1,50 @@
+version: 2.1
+
+orbs:
+  gcp-gcr: circleci/gcp-gcr@0.13.0
+
+jobs:
+  build-and-push:
+    docker:
+    - image: cimg/base:stable
+    environment:
+      IMAGE_NAME: gcr.io/YOUR_PROJECT_ID/nest-api
+    steps:
+    - checkout
+
+    # Authenticate with GCP
+    - run:
+        name: Authenticate to GCP
+        command: |
+          echo $GCLOUD_SERVICE_KEY | base64 --decode > gcloud-key.json
+          gcloud auth activate-service-account --key-file=gcloud-key.json
+          gcloud config set project YOUR_PROJECT_ID
+
+    # Build Docker image
+    - run:
+        name: Build Docker image
+        command: docker build -t $IMAGE_NAME:$CIRCLE_SHA1 .
+
+    # Push image to GCR
+    - run:
+        name: Push to GCR
+        command: |
+          gcloud auth configure-docker
+          docker push $IMAGE_NAME:$CIRCLE_SHA1
+
+    # Update GitOps manifest repo
+    - run:
+        name: Update image tag in GitOps repo
+        command: |
+          git clone https://github.com/your-org/nest-api-manifests.git
+          cd nest-api-manifests
+          sed -i "s|image:.*|image: $IMAGE_NAME:$CIRCLE_SHA1|g" deployment.yaml
+          git config user.name "circleci"
+          git config user.email "ci@circleci.com"
+          git commit -am "update image to $CIRCLE_SHA1"
+          git push origin main
+
+workflows:
+  deploy:
+    jobs:
+    - build-and-push
